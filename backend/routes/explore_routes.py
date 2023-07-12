@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from models.brains import Brain
 from models.settings import common_dependencies
 from models.users import User
+
 from routes.authorizations.brain_authorization import (
     has_brain_authorization,
     validate_brain_authorization,
@@ -69,6 +70,7 @@ async def download_endpoint(
         .select(
             "metadata->>file_name, metadata->>file_size, metadata->>file_extension, metadata->>file_url",
             "content",
+            "id",
         )
         .match({"metadata->>file_name": file_name})
         .execute()
@@ -78,12 +80,23 @@ async def download_endpoint(
     if len(documents) == 0:
         return {"documents": []}
 
-    related_brain_id = UUID(documents[0]["brain_id"])
-    if related_brain_id is None:
-        raise Exception(
-            f"File {file_name} has no brain_id associated with it. Please contact support."
-        )
+    vector_id = documents[0]["id"]
 
-    validate_brain_authorization(brain_id=related_brain_id, user_id=current_user.id)
+    associated_brains_response = (
+        commons["supabase"]
+        .table("brains_vectors")
+        .select("brain_id")
+        .filter("vector_id", "eq", vector_id)
+        .execute()
+    ).data
+
+    if len(associated_brains_response) == 0:
+        raise Exception(f"File {file_name} has no brain_id associated with it")
+
+    associated_brains_id = associated_brains_response[0]["brain_id"]
+    if associated_brains_id is None:
+        raise Exception(f"File {file_name} has no brain_id associated with it")
+
+    validate_brain_authorization(brain_id=associated_brains_id, user_id=current_user.id)
 
     return {"documents": documents}
